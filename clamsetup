@@ -1,0 +1,62 @@
+#!/bin/bash
+set -e
+
+# Update and install ClamAV
+sudo apt update
+sudo apt install clamav clamav-daemon -y
+
+echo "--> Setting up signature auto-updates"
+sudo systemctl enable clamav-freshclam
+sudo systemctl start clamav-freshclam
+
+# Set freshclam config
+CONFIG_FILE="/etc/clamav/freshclam.conf"
+DESIRED_VALUE="Checks 24"
+QUARANTINE_DIR="/quarantine"
+CRON_JOB='0 2 * * * clamscan -r /home --log=/var/log/clamav/daily.log --move=/quarantine'
+
+echo "--> Ensuring 'Checks 24' is set in freshclam.conf"
+if grep -iq "^Checks[[:space:]]\+24" "$CONFIG_FILE"; then
+    echo "✔ The value is already set to '$DESIRED_VALUE'."
+else
+    echo "✖ The value is not set to '$DESIRED_VALUE'. Updating..."
+    sudo cp "$CONFIG_FILE" "$CONFIG_FILE.bak"
+    if grep -iq "^Checks" "$CONFIG_FILE"; then
+        sudo sed -i 's/^Checks.*/Checks 24/i' "$CONFIG_FILE"
+    else
+        echo "$DESIRED_VALUE" | sudo tee -a "$CONFIG_FILE" > /dev/null
+    fi
+    echo "✔ Updated to '$DESIRED_VALUE'."
+    sudo systemctl restart clamav-freshclam
+fi
+
+# Setup quarantine directory
+echo "--> Setting up quarantine directory."
+if [ ! -d "$QUARANTINE_DIR" ]; then
+    sudo mkdir "$QUARANTINE_DIR"
+    echo "✔ Created $QUARANTINE_DIR"
+fi
+sudo chown root:root "$QUARANTINE_DIR"
+sudo chmod 700 "$QUARANTINE_DIR"
+echo "✔ Permissions set for $QUARANTINE_DIR"
+
+# Add daily scan to crontab
+echo "--> Checking root crontab for daily scan job..."
+CRON_TMP=$(mktemp)
+sudo crontab -l 2>/dev/null > "$CRON_TMP" || true
+if grep -Fq "$CRON_JOB" "$CRON_TMP"; then
+    echo "✔ Cron job already present."
+else
+    echo "$CRON_JOB" >> "$CRON_TMP"
+    sudo crontab "$CRON_TMP"
+    echo "✔ Cron job added."
+fi
+rm "$CRON_TMP"
+
+# Run initial scan
+echo "--> Running initial scan on /home..."
+clamscan -r /home
+
+# Show freshclam service status
+echo "--> Showing clamav-freshclam service status..."
+systemctl status clamav-freshclam --no-pager
