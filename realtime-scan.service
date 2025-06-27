@@ -1,0 +1,12 @@
+[Unit]
+Description=Real-Time Malware Scan with ClamAV
+After=network.target clamav-daemon.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/realtime_scan.sh
+Restart=on-failure
+User=root
+
+[Install]
+WantedBy=multi-user.target
